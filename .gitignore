@@ -154,3 +154,8 @@ Affinity/
 root_dir
 Notebooks
 test_results
+checkpoint*
+dataset*
+model_best*
+model_param*
+parameters*
