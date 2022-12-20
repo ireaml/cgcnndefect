@@ -140,9 +140,27 @@ def main():
     torch.manual_seed(args.seed)
 
     # Load data
-    print("Parsing arguments...")
-    print(f"Task: {args.task}")
-    print(f"Number of workers: {args.workers}")
+    print("Parsing arguments:")
+    print(f"\tTask: {args.task}")
+    print(f"\tModel type: {args.model_type}")
+    print(f"\tNumber of workers: {args.workers}")
+    print(f"\tNumber of conv layers: {args.n_conv}")
+    print(f"\tNumber of hidden layers after pooling: {args.n_h}")
+    print(f"\tNumber of hidden atom features in conv layers: {args.atom_fea_len}")
+    print(f"\tNumber of hidden features after pooling: {args.h_fea_len}")
+    print(f"\tOptimizer: {args.optim}")
+    print(f"\tInitial learning rate: {args.lr}")
+    print(f"\tNumber of epochs: {args.epochs}")
+    if args.start_epoch and args.resume:
+        print(f"\tStarting from epoch {args.start_epoch}")
+        print(f"\tResuming from checkpoint with path {args.resume}")
+    print(f"\tBatch size: {args.batch_size}")
+    print(f"\tCutoff radius: {args.radius}")
+    print(f"\tMax number of neighbors for sph harm featurization: {args.njmax}")
+    print(f"\tPytorch seed: {args.seed}")
+    print(f"\tPrint every {args.print_freq} batches")
+    print(f"Test results will be written to: {args.resultdir}\n")
+    
     #torch.multiprocessing.set_sharing_strategy('file_system')
     #print(f"Task==Fxyz: {args.task=='Fxyz'}")
     dataset = CIFData(
@@ -207,9 +225,10 @@ def main():
     else:
         global_fea_len = 0
     print(
-        f"Number of atom features: {orig_atom_fea_len}\n"
-        + f"Number of bond features: {nbr_fea_len}\n"
-        + f"Number of global features: {global_fea_len}\n"
+        f"\nNumber of features:\n"
+        + f"\t-Atom features: {orig_atom_fea_len}\n"
+        + f"\t-Bond features: {nbr_fea_len}\n"
+        + f"\t-Global features: {global_fea_len}\n"
     )
     if args.model_type == 'cgcnn':
         model = CrystalGraphConvNet(
