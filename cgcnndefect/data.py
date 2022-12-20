@@ -4,7 +4,6 @@ import csv
 import functools
 import json
 import os
-import random
 import warnings
 import itertools
 
@@ -332,6 +331,9 @@ class AtomInitializer(object):
         self._embedding = {}
 
     def get_atom_fea(self, atom_type):
+        """
+        Returns element feature vector for a given element type
+        """
         assert atom_type in self.atom_types
         return self._embedding[atom_type]
 
@@ -483,10 +485,9 @@ class CIFData(Dataset):
             })
         """
         
-        # Check root_dir & id_prop.csv
+        # Check root_dir & input dataframer exist
         if not os.path.exists(self.root_dir):
             raise FileNotFoundError(f"root_dir {self.root_dir} does not exist!")
-
         # Load df with structures & target property
         if not os.path.exists(os.path.join(self.root_dir, 'df.pkl')):
             raise FileNotFoundError("Pickle file df.pkl does not exist! Please add it to the root directory.")
@@ -495,10 +496,9 @@ class CIFData(Dataset):
         # Check Structures & Target columns
         if not set(["Structures", "Target"]).issubset(set(self.df.columns.values)):
             raise KeyError(
-                "Structures and Target columns are not found in df.pkl! Please include these columns in the dataframe."
+                "Structures and Target columns are not found in df.pkl !"
+                + "Please include these columns in the dataframe."
             )
-        # Shuffle data to avoid bias
-        random.seed(self.random_seed)
         atom_init_file = os.path.join(self.root_dir, self.init_embed_file)
         if not os.path.exists(atom_init_file):
             raise FileNotFoundError("Initial atom emebdding file (atom_init.json) does not exist!")
@@ -518,13 +518,13 @@ class CIFData(Dataset):
                     f'The dataframe does not contain any columns with the {self.crys_spec} string!'
                 )
                     
-        # if atom spcific attributes for each crystal provided
+        # if atom specific attributes for each crystal provided
         if self.atom_spec is not None:
             # Local properties are provided in the df, their column label
             # contains the atom_spec string
             atom_props = self.df.columns[self.df.columns.str.contains(self.atom_spec)]
             if atom_props.size > 0:
-                self.atom_fea = list(self.df[atom_props].to_numpy())
+                self.local_fea = list(self.df[atom_props].to_numpy())
             else:
                 raise ValueError(
                     f'The dataframe does not contain any columns with the {self.atom_spec} string!'
@@ -621,7 +621,9 @@ class CIFData(Dataset):
         #nbr_type = torch.LongTensor(nbr_type) #MW
         #pair_type = torch.LongTensor(pair_type) #MW
         (
-            atom_fea, nbr_fea, nbr_fea_idx, atom_type,
+            atom_fea, 
+            nbr_fea, nbr_fea_idx, 
+            atom_type,
             nbr_type, nbr_dist, pair_type,
             nbr_fea_idx_all, gs_fea, gp_fea, gd_fea 
         ) = self.featurize_from_nbr_and_atom_list(
@@ -639,7 +641,9 @@ class CIFData(Dataset):
         if self.atom_spec is not None:
             local_fea = self.local_fea[idx]
             #print(cif_id, atom_fea.shape, torch.Tensor(local_fea).shape)
-            atom_fea = torch.hstack([atom_fea, torch.Tensor(local_fea)])
+            atom_fea = torch.hstack(
+                [atom_fea, torch.Tensor(local_fea)]
+            )  # concatenate element and (site) local features
 
 
         # return format for DataLoader
@@ -713,26 +717,28 @@ class CIFData(Dataset):
         cif_id='struct'
     ):
         """
-        all_atom_types : list of ints
-            list of atomic numbers for all sites
-        all_nbrs : list of list of [int, float, int]
-            Zj1 is atomic number of the nbr j1
-            r_ij1 is distance betwen site i and nbr j1
-            ind_j1 is site index of nbr j1
+        Featurize structure from neighbor and atom list
+        Args:
+            all_atom_types : list of ints
+                list of atomic numbers for all sites
+            all_nbrs : list of list of [int, float, int]
+                Zj1 is atomic number of the nbr j1
+                r_ij1 is distance betwen site i and nbr j1
+                ind_j1 is site index of nbr j1
 
-                   [
-                     [ # site i=0
-                       [ Z_j1 , r_ij1 , ind_j1 ],
-                       [ Z_j2 , r_ij2 , ind_j2 ],
-                       [ ...                   ]
-                     ] ,
-                     [ # site i=1
-                       [ Z_j1 , r_ij1 , ind_j1 ],
-                       [ Z_j2 , r_ij2 , ind_j2 ],
-                       [ ...                   ]
-                     ]
-                     ...
-                   ]
+                    [
+                        [ # site i=0
+                        [ Z_j1 , r_ij1 , ind_j1 ],
+                        [ Z_j2 , r_ij2 , ind_j2 ],
+                        [ ...                   ]
+                        ] ,
+                        [ # site i=1
+                        [ Z_j1 , r_ij1 , ind_j1 ],
+                        [ Z_j2 , r_ij2 , ind_j2 ],
+                        [ ...                   ]
+                        ]
+                        ...
+                    ]
 
         TODO: cleanup the insane list comprehensions
         TODO: break-up this function into model specific requirements
@@ -741,33 +747,46 @@ class CIFData(Dataset):
         # Featurization
         #atom_fea = np.vstack([self.ari.get_atom_fea(crystal[i].specie.number)
         #                      for i in range(len(crystal))])
-        atom_fea = np.vstack([self.ari.get_atom_fea(num)\
-                             for num in all_atom_types])
+        # Element features
+        atom_fea = np.vstack(
+            [self.ari.get_atom_fea(num) for num in all_atom_types]
+        )
         atom_fea = torch.Tensor(atom_fea)
-        all_nbrs = [sorted(nbrs, key=lambda x: x[1]) for nbrs in all_nbrs]
+        all_nbrs = [
+            sorted(nbrs, key=lambda x: x[1]) for nbrs in all_nbrs
+        ]  # sort neighbours by distance
         nbr_fea_idx, nbr_dist, nbr_fea_idx_all = [], [], []
         nbr_type, pair_type = [], [] # MW
         nbr_fea_idx_all, gs_fea_all, gp_fea_all, gd_fea_all = [], [], [], []
 
+        # Loop over neighbours
         for i, nbr in enumerate(all_nbrs):
             if len(nbr) < self.max_num_nbr:
-                warnings.warn('%s did not find enough neighbors to build graph. '
-                              'If it happens frequently, consider increase '
-                              'radius.'%cif_id)
-                nbr_fea_idx.append(list(map(lambda x: x[2], nbr)) +
-                                   [0] * (self.max_num_nbr - len(nbr)))
-                nbr_dist.append(list(map(lambda x: x[1], nbr)) +
-                               [self.radius + 1.] * (self.max_num_nbr -
-                                                     len(nbr)))
+                warnings.warn(
+                    f'Structure with ID {cif_id} did not find enough neighbors '
+                    ' to build graph. If it happens frequently, consider increase '
+                    'radius.'
+                )
+                # Append neighbour index, and pad with zeros if not enough neighbors
+                nbr_fea_idx.append(
+                    list(map(lambda x: x[2], nbr)) 
+                    + [0] * (self.max_num_nbr - len(nbr))
+                )
+                # Same for distance
+                nbr_dist.append(
+                    list(map(lambda x: x[1], nbr)) 
+                    + [self.radius + 1.] * (self.max_num_nbr - len(nbr))
+                )
 
-                # Double check the nbr_fea_dix construction
+                # Double check the nbr_fea_idx construction
                 #assert list(map(lambda x: x[0].specie.number, nbr)) +\
                 #                [0] * (self.max_num_nbr - len(nbr)) ==\
                 #       list(map(lambda x: all_atom_types[x[2]], nbr)) +\
                 #                [0] * (self.max_num_nbr - len(nbr)) ==\
-
-                nbr_type.append(list(
-                    map(lambda x: all_atom_types[x[2]],nbr)) 
+                
+                # Same for element type
+                nbr_type.append(
+                    list(map(lambda x: all_atom_types[x[2]], nbr)) 
                     + [0] * (self.max_num_nbr - len(nbr))
                 )
 
@@ -857,9 +876,11 @@ class CIFData(Dataset):
         nbr_type = torch.LongTensor(nbr_type) #MW
         pair_type = torch.LongTensor(pair_type) #MW
 
-        return (atom_fea, nbr_fea, nbr_fea_idx,\
-                atom_type, nbr_type, nbr_dist, pair_type,\
-                nbr_fea_idx_all, gs_fea, gp_fea, gd_fea)\
+        return (
+            atom_fea, nbr_fea, nbr_fea_idx,
+            atom_type, nbr_type, nbr_dist, pair_type,
+            nbr_fea_idx_all, gs_fea, gp_fea, gd_fea
+        )
 
 
 @torch.jit.script
