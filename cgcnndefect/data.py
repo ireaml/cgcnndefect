@@ -432,7 +432,7 @@ class CIFData(Dataset):
         random_seed=123,
         crys_spec = None,
         atom_spec = None,
-        csv_ext = '',
+        pkl_ext = '',
         model_type='cgcnn',
         K = 4,
         njmax=75,
@@ -447,7 +447,7 @@ class CIFData(Dataset):
         self.random_seed = random_seed
         self.crys_spec = crys_spec
         self.atom_spec = atom_spec
-        self.csv_ext = csv_ext
+        self.pkl_ext = pkl_ext
         self.model_type = model_type
         if self.model_type == 'spooky':
             self.compute_sph_harm = True

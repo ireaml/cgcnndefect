@@ -1,8 +1,9 @@
-# Personal and defect modifications to CGCNN
+# Personal modifications to CGCNN-defect
 
-Modifications for predicting defects and other various personal modifications have been made to make some tasks easier: cross-validation, running on cluster, etc.
+Small modifications to [cgcnndefect](https://github.com/ireaml/cgcnndefect), developed by [Matthew Witman](https://scholar.google.com/citations?hl=en&user=bb7EKzIAAAAJ&view_op=list_works&sortby=pubdate), which iself is based on the
+CGCNN model developed by [Tian Xie](http://txie.me) and [Prof. Jeffrey Grossman](https://dmse.mit.edu/faculty/profile/grossman
 
-### Installable package
+## Installable package
 To install as a package use
 ```bash
 pip install -e .
@@ -12,17 +13,22 @@ which allows you to then execute training or prediction tasks from anywhere usin
 cgcnn-defect-train $flags
 cgcnn-defect-predict $flags
 ```
+For instance, the following
+```bash
+cgcnn-defect-train root_dir --radius 5.0
+```
+specifies the folder `root_dir` where the input files are located, as well as the cutoff radius (in A) used to look for the neighbours of each atom.
 
-### Various CL args
-Can control target files via CL args to facilitate high-throughput execution across different encoding strategies, cross-validation, etc.
-- To change elemenent encoding file
-```bash
---init-embed-file $your_atom_init.json
-```
-- To change the default id_prop.csv file of (structure,property) data to id_prop.csv.your_csv_ext:
-```bash
---csv-ext .your_csv_ext
-```
+## Command line arguments
+Several command line arguments are available to control target files and facilitate high-throughput execution across different encoding strategies, cross-validation, etc. These include:
+- Change elemenent encoding file
+  ```bash
+  --init-embed-file $your_atom_init.json
+  ```
+- Change the default id_prop.csv file of (structure, property) data to id_prop.csv.your_csv_ext:
+  ```bash
+  --csv-ext .your_csv_ext
+  ```
 
 ### Defect modifications
 - Pooling function has been hard coded to only extract the feature vector of the node at index i=0 (the atom to be defected). In progress: this will be made a lot more efficient in the future by specifying the index from the CL and not needing multiple CIF files for all unique defects within a given host structure
@@ -66,7 +72,7 @@ Please cite the following work if you want to use CGCNN and defect modifications
 }
 ```
 
-# Crystal Graph Convolutional Neural Networks
+# README of Crystal Graph Convolutional Neural Networks
 
 This software package implements the Crystal Graph Convolutional Neural Networks (CGCNN) that takes an arbitary crystal structure to predict material properties. 
 

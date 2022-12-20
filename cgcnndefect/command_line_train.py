@@ -97,16 +97,22 @@ parser.add_argument('--resultdir', default='.', type=str, metavar='N',
 parser.add_argument('--jit', action='store_true',
                     help='Create a serialized Troch script')
 parser.add_argument('--crys-spec', default=None, type=str, metavar='N',
-                    help='ext of file that contains global crystal '
-                         'features for each example (i.e. example.ext)'
-                         'Features are concatenated to the pooled crystal'
-                         'vector')
+                    help='String included in the column labels '
+                    'of the global features (in the input dataframe). '
+                    'For example, if --crys-spec "Global"'
+                    'then the column labels could be "Global_Formation_Energy", '
+                    '"Global_Bandgap", "Global_Whatever", etc.'
+                    'These global features are concatenated to the pooled crystal'
+                    'vector')
 parser.add_argument('--atom-spec', default=None, type=str, metavar='N',
-                    help='ext of file that contains atomic features '
-                         'specific for each example (i.e. example.ext)'
-                         'Features are concated to orig_atom_fea')
-parser.add_argument('--csv-ext', default='', type=str,
-                    help='id_prop.csv + csv-ext so that test sets can be manually '
+                    help='String included in the column labels '
+                    'of the local/atomic features (in the input dataframe). '
+                    'For example, if --atom-spec "Local"'
+                    'then the column labels could be "Local_Oxidation_state", '
+                    '"Local_Whatever", etc.'
+                    'Features are concated to orig_atom_fea')
+parser.add_argument('--pkl-ext', default='', type=str,
+                    help='df.pkl + pkl-ext so that test sets can be manually '
                          'specified without recopying all of the data in a diff folder')
 parser.add_argument('--model-type', default='cgcnn', type=str,
                     choices=['cgcnn','spooky'])
@@ -146,7 +152,7 @@ def main():
         radius=args.radius,           # IM: radius for neighbor search
         crys_spec = args.crys_spec,   # MW: if global crystal features available
         atom_spec = args.atom_spec,   # MW: if local/atom features available
-        csv_ext = args.csv_ext,       # MW: if using a specific id_prop.csv.*
+        pkl_ext = args.pkl_ext,       # MW: if using a specific df.pkl.*
         model_type = args.model_type, # MW: if using non-CGCNN model
         njmax = args.njmax,           # MW: max nbrs for sph_harm
         init_embed_file = args.init_embed_file, # MW: choosing specific file for initial atom embed
