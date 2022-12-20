@@ -1,7 +1,7 @@
 # Personal modifications to CGCNN-defect
 
 Small modifications to [cgcnndefect](https://github.com/ireaml/cgcnndefect), developed by [Matthew Witman](https://scholar.google.com/citations?hl=en&user=bb7EKzIAAAAJ&view_op=list_works&sortby=pubdate), which iself is based on the
-CGCNN model developed by [Tian Xie](http://txie.me) and [Prof. Jeffrey Grossman](https://dmse.mit.edu/faculty/profile/grossman
+[CGCNN model](https://github.com/txie-93/cgcnn) developed by [Tian Xie](http://txie.me) and [Prof. Jeffrey Grossman](https://dmse.mit.edu/faculty/profile/grossman)
 
 ## Installable package
 To install as a package use
