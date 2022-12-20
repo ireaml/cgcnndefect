@@ -26,7 +26,7 @@ Several command line arguments are available to control target files and facilit
   --radius 5.0
   ```
 - Specify global and/or local features (which should be included as columns in the input dataframe, and their
-  column labels should contain the specified strings (e.g. if --crys-spec Global then valid column labels would be Global_BandGap Global_Whatever).
+  column labels should contain the specified strings (e.g. if --crys-spec Global then valid column labels would be Global_BandGap, Global_Whatever...).
   ```bash
   --crys-spec Global
   ```
