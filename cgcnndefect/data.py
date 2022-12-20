@@ -298,10 +298,12 @@ class G2Descriptor(object):
    
         # TODO
         # Add cutoff function 
-        return [np.exp(-eta * ((Rij - offset) ** 2.)/ (self.Rc ** 2.)) \
-                for (eta, offset) in self.etas_offsets_basis]
+        return [
+            np.exp(
+                -eta * ((Rij - offset) ** 2.)/ (self.Rc ** 2.)
+            ) for (eta, offset) in self.etas_offsets_basis
+        ]
         
-
     def expand(self,distances):
         """
         Apply BP G2 descriptors (only atom centered, so basically takes a list 
@@ -310,8 +312,11 @@ class G2Descriptor(object):
 
         # TODO
         # should be good vectorization, need to double check...
-        res = np.exp(-self.etas*((distances[..., np.newaxis] - self.offsets) ** 2.)/\
-                     (self.Rc ** 2.))
+        res = np.exp(
+            -self.etas*(
+                (distances[..., np.newaxis] - self.offsets) ** 2.
+            ) / (self.Rc ** 2.)
+        )
         
         return res
 
@@ -333,16 +338,18 @@ class AtomInitializer(object):
     def load_state_dict(self, state_dict):
         self._embedding = state_dict
         self.atom_types = set(self._embedding.keys())
-        self._decodedict = {idx: atom_type for atom_type, idx in
-                            self._embedding.items()}
+        self._decodedict = {
+            idx: atom_type for atom_type, idx in self._embedding.items()
+        }
 
     def state_dict(self):
         return self._embedding
 
     def decode(self, idx):
         if not hasattr(self, '_decodedict'):
-            self._decodedict = {idx: atom_type for atom_type, idx in
-                                self._embedding.items()}
+            self._decodedict = {
+                idx: atom_type for atom_type, idx in self._embedding.items()
+            }
         return self._decodedict[idx]
 
 
