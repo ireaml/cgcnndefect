@@ -2,23 +2,25 @@ from __future__ import print_function, division
 
 import torch
 import torch.nn as nn
-import itertools
+# import itertools
 import numpy as np
-from typing import Tuple,List
+from typing import Tuple, List
 
 from .potentials import energyZBL
 #from .data import CIFDataFeaturizer
 
 @torch.jit.script
 class CIFDataFeaturizer(object):
+  
     def __init__(self, name:str):
         self.name = name
-    def foo(self):
-        print("dict:"+self.name)
-        ind = [{2:[0,0]}, {1:[1,1]}, {0:[2,2]}]
-        # map doesn't seem to be supported
-        #print(list(map(lambda x: x[1],ind)))
         
+    def foo(self):
+        print("dict:" + self.name)
+        ind = [{2: [0, 0]}, {1: [1, 1]}, {0: [2, 2]}]
+        # map doesn't seem to be supported
+        #print(list(map(lambda x: x[1],ind)))     
+
 
 class ConvLayer(nn.Module):
     """
@@ -39,8 +41,10 @@ class ConvLayer(nn.Module):
         super(ConvLayer, self).__init__()
         self.atom_fea_len = atom_fea_len
         self.nbr_fea_len = nbr_fea_len
-        self.fc_full = nn.Linear(2*self.atom_fea_len+self.nbr_fea_len,
-                                 2*self.atom_fea_len)
+        self.fc_full = nn.Linear(
+          2*self.atom_fea_len + self.nbr_fea_len,
+          2*self.atom_fea_len
+        )
         self.sigmoid = nn.Sigmoid()
         self.softplus1 = nn.Softplus()
         self.bn1 = nn.BatchNorm1d(2*self.atom_fea_len)
@@ -95,10 +99,12 @@ class CrystalGraphConvNet(nn.Module):
     Create a crystal graph convolutional neural network for predicting total
     material properties.
     """
-    def __init__(self, orig_atom_fea_len, nbr_fea_len,
-                 atom_fea_len=64, n_conv=3, h_fea_len=128, n_h=1,
-                 classification=False, Fxyz=False, all_elems=[0],
-                 global_fea_len=0):
+    def __init__(
+      self, orig_atom_fea_len, nbr_fea_len,
+      atom_fea_len=64, n_conv=3, h_fea_len=128, n_h=1,
+      classification=False, Fxyz=False, all_elems=[0],
+      global_fea_len=0
+    ):
         """
         Initialize CrystalGraphConvNet.
 
@@ -130,9 +136,11 @@ class CrystalGraphConvNet(nn.Module):
         self.classification = classification
         self.Fxyz = Fxyz
         self.embedding = nn.Linear(orig_atom_fea_len, atom_fea_len)
-        self.convs = nn.ModuleList([ConvLayer(atom_fea_len=atom_fea_len,
-                                    nbr_fea_len=nbr_fea_len)
-                                    for _ in range(n_conv)])
+        self.convs = nn.ModuleList([
+            ConvLayer(
+              atom_fea_len=atom_fea_len, nbr_fea_len=nbr_fea_len
+            ) for _ in range(n_conv)
+        ])
         self.conv_to_fc = nn.Linear(atom_fea_len+global_fea_len, h_fea_len)
         self.conv_to_fc_softplus = nn.Softplus()
         if n_h > 1:
@@ -390,8 +398,9 @@ class CrystalGraphConvNet(nn.Module):
         # for defect, we are really only interested with the feature
         # vector of the node that would become the defect
         #print([idx_map[0] for idx_map in crystal_atom_idx])
-        summed_fea = [torch.index_select(atom_fea,0,idx_map[0])\
-                      for idx_map in crystal_atom_idx]
+        summed_fea = [
+          torch.index_select(atom_fea, 0, idx_map[0]) for idx_map in crystal_atom_idx
+        ]
         #print(summed_fea)
         #summed_fea = [atom_fea[idx_map[0]] for idx_map in crystal_atom_idx]
 

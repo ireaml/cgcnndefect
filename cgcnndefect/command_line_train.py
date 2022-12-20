@@ -22,6 +22,7 @@ from .model import CrystalGraphConvNet
 from .util import save_checkpoint, AverageMeter, class_eval, mae, Normalizer
 from .model_sph_harmonics import SpookyModel, SpookyModelVectorized
 
+
 parser = argparse.ArgumentParser(description='Crystal Graph Convolutional Neural Networks')
 parser.add_argument('data_options', metavar='OPTIONS', nargs='+',
                     help='dataset options, started with the path to root dir, '
@@ -90,7 +91,6 @@ parser.add_argument('--n-h', default=1, type=int, metavar='N',
 parser.add_argument("--seed", default=0,type=int,
                     help='pytorch seed')
 
-
 # New CL options added by MW
 parser.add_argument('--resultdir', default='.', type=str, metavar='N',
                     help='location to write test results')
@@ -114,11 +114,11 @@ parser.add_argument('--njmax', default=75, type=int,
                     help='Max num nbrs for sph harm featurization')
 parser.add_argument('--init-embed-file',default='atom_init.json', type=str,
                     help='file for the initial atom embeddings (based only on elemental identity)')
-
+parser.add_argument('--radius', default=4.5, type=float, help='Radius for neighbor search')
 
 args = parser.parse_args(sys.argv[1:])
 
-with open(os.path.join(args.resultdir,'parameters_CGCNNtrain.json'),'w') as fp:
+with open(os.path.join(args.resultdir, 'parameters_CGCNNtrain.json'),'w') as fp:
     json.dump(vars(args),fp)
 
 args.cuda = not args.disable_cuda and torch.cuda.is_available()
@@ -133,20 +133,26 @@ def main():
     global args, best_mae_error
     torch.manual_seed(args.seed)
 
-    # load data
-    print(args.task)
+    # Load data
+    print("Parsing arguments...")
+    print(f"Task: {args.task}")
+    print(f"Number of workers: {args.workers}")
     #torch.multiprocessing.set_sharing_strategy('file_system')
-    print(args.task=='Fxyz')
-    dataset = CIFData(*args.data_options,
-                      args.task=='Fxyz',            # MW: to remove
-                      args.all_elems,               # MW: needed for computing ZBL
-                      crys_spec = args.crys_spec,   # MW: if global crystal features available
-                      atom_spec = args.atom_spec,   # MW: if local/atom features available
-                      csv_ext = args.csv_ext,       # MW: if using a specific id_prop.csv.*
-                      model_type = args.model_type, # MW: if using non-CGCNN model
-                      njmax = args.njmax,           # MW: max nbrs for sph_harm
-                      init_embed_file = args.init_embed_file) # MW: choosing specific file for initial atom embed
+    #print(f"Task==Fxyz: {args.task=='Fxyz'}")
+    dataset = CIFData(
+        *args.data_options,
+        args.task=='Fxyz',            # MW: to remove
+        args.all_elems,               # MW: needed for computing ZBL
+        radius=args.radius,           # IM: radius for neighbor search
+        crys_spec = args.crys_spec,   # MW: if global crystal features available
+        atom_spec = args.atom_spec,   # MW: if local/atom features available
+        csv_ext = args.csv_ext,       # MW: if using a specific id_prop.csv.*
+        model_type = args.model_type, # MW: if using non-CGCNN model
+        njmax = args.njmax,           # MW: max nbrs for sph_harm
+        init_embed_file = args.init_embed_file, # MW: choosing specific file for initial atom embed
+    ) 
     collate_fn = collate_pool
+    # Split dataset into train, val, and test
     train_loader, val_loader, test_loader = get_train_val_test_loader(
         dataset=dataset,
         collate_fn=collate_fn,
@@ -159,9 +165,10 @@ def main():
         train_size=args.train_size,
         val_size=args.val_size,
         test_size=args.test_size,
-        return_test=True)
+        return_test=True
+    )
 
-    # obtain target value normalizer
+    # Obtain target value normalizer
     if args.task == 'classification':
         normalizer = Normalizer(torch.zeros(2))
         normalizer.load_state_dict({'mean': 0., 'std': 1.})
@@ -172,82 +179,96 @@ def main():
                           'Lower accuracy is expected. ')
             sample_data_list = [dataset[i] for i in range(len(dataset))]
         else:
-            sample_data_list = [dataset[i] for i in
-                                sample(range(len(dataset)), 500)]
+            sample_data_list = [
+                dataset[i] for i in sample(range(len(dataset)), 500)
+            ]
         #_, sample_target, _ = collate_pool(sample_data_list) #<- Fxyz mod
-        _, sample_target, sample_target_Fxyz, _ =\
-            collate_pool(sample_data_list)
+        _, sample_target, sample_target_Fxyz, _ = collate_pool(sample_data_list)
         normalizer = Normalizer(sample_target)
         if args.task == 'Fxyz':
             raise NotImplemented("Forces not implemented yet")
-            normalizer_Fxyz = Normalizer(sample_target_Fxyz)
+            # normalizer_Fxyz = Normalizer(sample_target_Fxyz)
         else:
             normalizer_Fxyz = Normalizer(sample_target) # dummy object for compatibility
 
-    # build model
-    #structures, _, _, = dataset[0] #<- Fxyz mod
+    # Build model
+    # structures, _, _, = dataset[0] #<- Fxyz mod
     structures, _, _, _ = dataset[0]
-    orig_atom_fea_len = structures[0].shape[-1]
-    nbr_fea_len = structures[1].shape[-1]
+    orig_atom_fea_len = structures[0].shape[-1]  # Number of atom features
+    nbr_fea_len = structures[1].shape[-1]  # Number of bond features
     if args.crys_spec is not None:
         global_fea_len = len(structures[7])
     else:
         global_fea_len = 0
-
+    print(
+        f"Number of atom features: {orig_atom_fea_len}\n"
+        + f"Number of bond features: {nbr_fea_len}\n"
+        + f"Number of global features: {global_fea_len}\n"
+    )
     if args.model_type == 'cgcnn':
-        model = CrystalGraphConvNet(orig_atom_fea_len, nbr_fea_len,
-                                    atom_fea_len=args.atom_fea_len,
-                                    n_conv=args.n_conv,
-                                    h_fea_len=args.h_fea_len,
-                                    n_h=args.n_h,
-                                    classification=True if args.task ==
-                                                           'classification' else False,
-                                    Fxyz=True if args.task == 'Fxyz' else False, #MW
-                                    all_elems=args.all_elems, #MW
-                                    global_fea_len=global_fea_len) #MW
+        model = CrystalGraphConvNet(
+            orig_atom_fea_len, nbr_fea_len,
+            atom_fea_len=args.atom_fea_len,
+            n_conv=args.n_conv,
+            h_fea_len=args.h_fea_len,
+            n_h=args.n_h,
+            classification=True if args.task == 'classification' else False,
+            Fxyz=True if args.task == 'Fxyz' else False, #MW
+            all_elems=args.all_elems, #MW
+            global_fea_len=global_fea_len #MW
+        )
     elif args.model_type == 'spooky':
         if args.njmax > 0:
-            model = SpookyModelVectorized(orig_atom_fea_len,
-                                          atom_fea_len = args.atom_fea_len,
-                                          n_conv = args.n_conv,
-                                          h_fea_len = args.h_fea_len,
-                                          n_h = args.n_h,
-                                          global_fea_len = global_fea_len,
-                                          njmax = args.njmax) #MW
+            model = SpookyModelVectorized(
+                orig_atom_fea_len,
+                atom_fea_len = args.atom_fea_len,
+                n_conv = args.n_conv,
+                h_fea_len = args.h_fea_len,
+                n_h = args.n_h,
+                global_fea_len = global_fea_len,
+                njmax = args.njmax
+            ) #MW
         else:
             # TODO: to be discontinued once final testing done
-            model = SpookyModel(orig_atom_fea_len,
-                                atom_fea_len = args.atom_fea_len,
-                                n_conv = args.n_conv,
-                                h_fea_len = args.h_fea_len,
-                                n_h = args.n_h,
-                                global_fea_len = global_fea_len) #MW
+            model = SpookyModel(
+                orig_atom_fea_len,
+                atom_fea_len = args.atom_fea_len,
+                n_conv = args.n_conv,
+                h_fea_len = args.h_fea_len,
+                n_h = args.n_h,
+                global_fea_len = global_fea_len
+            ) #MW
         
                             
-
-
-    print("Number trainable params: %d"%\
-          sum(p.numel() for p in model.parameters() if p.requires_grad))
-
+    print(
+        "Number trainable params: %d"%sum(p.numel() for p in model.parameters() if p.requires_grad)
+    )
+    print("Training...\n")
+    
     if args.cuda:
         model.cuda()
 
-    # define loss func and optimizer
+    # Define loss func and optimizer
     if args.task == 'classification':
         criterion = nn.NLLLoss()
     else:
         criterion = nn.MSELoss()
     if args.optim == 'SGD':
-        optimizer = optim.SGD(model.parameters(), args.lr,
-                              momentum=args.momentum,
-                              weight_decay=args.weight_decay)
+        optimizer = optim.SGD(
+            model.parameters(),
+            args.lr,
+            momentum=args.momentum,
+            weight_decay=args.weight_decay,
+        )
     elif args.optim == 'Adam':
-        optimizer = optim.Adam(model.parameters(), args.lr,
-                               weight_decay=args.weight_decay)
+        optimizer = optim.Adam(
+            model.parameters(), args.lr,
+            weight_decay=args.weight_decay
+        )
     else:
         raise NameError('Only SGD or Adam is allowed as --optim')
 
-    # optionally resume from a checkpoint
+    # Optionally resume from a checkpoint
     if args.resume:
         if os.path.isfile(args.resume):
             print("=> loading checkpoint '{}'".format(args.resume))
@@ -262,8 +283,7 @@ def main():
         else:
             print("=> no checkpoint found at '{}'".format(args.resume))
 
-    scheduler = MultiStepLR(optimizer, milestones=args.lr_milestones,
-                            gamma=0.1)
+    scheduler = MultiStepLR(optimizer, milestones=args.lr_milestones, gamma=0.1)
     #scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, 
     #                                              base_lr=args.lr, 
     #                                              max_lr=args.lr*5,
@@ -272,20 +292,23 @@ def main():
 
     # Pickle the CIFData object so the exact same settings
     # can be used in predict mode
-    with open(os.path.join(args.resultdir,'dataset.pth.tar'),'wb') as f:
+    with open(os.path.join(args.resultdir,'dataset.pth.tar'), 'wb') as f:
         pickle.dump(dataset, f) 
 
-    f = open(os.path.join(args.resultdir,"train.log"),"w")
+    f = open(os.path.join(args.resultdir, "train.log"), "w")
 
     for epoch in range(args.start_epoch, args.epochs):
-        # train for one epoch
-        summary = train(train_loader, model, criterion, 
-              optimizer, epoch, normalizer, normalizer_Fxyz)
+        # Train for one epoch
+        summary = train(
+            train_loader, model, criterion, 
+            optimizer, epoch, normalizer, normalizer_Fxyz
+        )
         f.write(summary)
 
-        # evaluate on validation set
-        mae_error,summary = validate(val_loader, model, criterion, normalizer, 
-                             normalizer_Fxyz)
+        # Evaluate on validation set
+        mae_error,summary = validate(
+            val_loader, model, criterion, normalizer, normalizer_Fxyz
+        )
         f.write(summary)
 
         if mae_error != mae_error:
@@ -295,28 +318,30 @@ def main():
         scheduler.step()
 
 
-        # remember the best mae_eror and save checkpoint
-        if args.task == 'regression' or args.task=='Fxyz':
+        # Remember the best mae_eror and save checkpoint
+        if args.task in ['regression', 'Fxyz']:
             is_best = mae_error < best_mae_error
             best_mae_error = min(mae_error, best_mae_error)
         else:
             is_best = mae_error > best_mae_error
             best_mae_error = max(mae_error, best_mae_error)
-        save_checkpoint({
-            'epoch': epoch + 1,
-            'state_dict': model.state_dict(),
-            'best_mae_error': best_mae_error,
-            'optimizer': optimizer.state_dict(),
-            'normalizer': normalizer.state_dict(),
-            'normalizer_Fxyz': normalizer_Fxyz.state_dict(),
-            'args': vars(args)
-        }, is_best, args.resultdir)
+        save_checkpoint(
+            {
+                'epoch': epoch + 1,
+                'state_dict': model.state_dict(),
+                'best_mae_error': best_mae_error,
+                'optimizer': optimizer.state_dict(),
+                'normalizer': normalizer.state_dict(),
+                'normalizer_Fxyz': normalizer_Fxyz.state_dict(),
+                'args': vars(args)
+            }, is_best, args.resultdir
+        )
 
-    # test best model
+    # Test best model
     print('---------Evaluate Model on Test Set---------------')
-    best_checkpoint = torch.load(os.path.join(args.resultdir,'model_best.pth.tar'))
+    best_checkpoint = torch.load(os.path.join(args.resultdir, 'model_best.pth.tar'))
     model.load_state_dict(best_checkpoint['state_dict'])
-    mae,summary = validate(test_loader, model, criterion, normalizer, normalizer_Fxyz, test=True)
+    mae, summary = validate(test_loader, model, criterion, normalizer, normalizer_Fxyz, test=True)
 
     if args.jit:
         sm = torch.jit.script(model)
@@ -332,9 +357,12 @@ def main():
     f.write(summary)
     f.close()
 
-def train(train_loader, model, criterion, optimizer, epoch, 
-          normalizer, normalizer_Fxyz):
-    summary=""
+
+def train(
+    train_loader, model, criterion, optimizer, epoch, 
+    normalizer, normalizer_Fxyz
+):
+    summary = ""
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
@@ -368,32 +396,37 @@ def train(train_loader, model, criterion, optimizer, epoch,
                          [crys_idx.cuda(non_blocking=True) for crys_idx in input[3]])
         else:
             if args.model_type == 'cgcnn':
-                input_var = (Variable(input[0]), # batch_atom_fea
-                             Variable(input[1]), # batch_nbr_fea
-                             input[2],           # batch_nbr_fea_idx
-                             input[3],           # crystal_atom_idx
-                             input[4],           # MW: batch_atom_type 
-                             input[5],           # MW: batch_nbr_type
-                             input[6],           # MW: batch_nbr_dist
-                             input[7],           # MW: batch_pair_type
-                             input[8])           # MW: batch_global_fea
+                input_var = (
+                    Variable(input[0]), # batch_atom_fea
+                    Variable(input[1]), # batch_nbr_fea
+                    input[2],           # batch_nbr_fea_idx
+                    input[3],           # crystal_atom_idx
+                    input[4],           # MW: batch_atom_type 
+                    input[5],           # MW: batch_nbr_type
+                    input[6],           # MW: batch_nbr_dist
+                    input[7],           # MW: batch_pair_type
+                    input[8],           # MW: batch_pair_dist
+                )          
             elif args.model_type == 'spooky':
-                input_var = (Variable(input[0]), # batch_atom_fea
-                             input[9],           # batch_nbr_fea_idx_all
-                             input[3],           # crystal_atom_idx
-                             input[10],          # batch_gs_fea
-                             input[11],          # batch_gp_fea
-                             input[12],          # batch_gd_fea
-                             input[8])           # batch_global_fea
-
+                input_var = (
+                    Variable(input[0]), # batch_atom_fea
+                    input[9],           # batch_nbr_fea_idx_all
+                    input[3],           # crystal_atom_idx
+                    input[10],          # batch_gs_fea
+                    input[11],          # batch_gp_fea
+                    input[12],          # batch_gd_fea
+                    input[8],           # batch_global_fea
+                )
             if args.all_elems != [0]:
-                crys_rep_ener = model.compute_repulsive_ener(input[3],
-                                                             input[4],
-                                                             input[5],
-                                                             input[6])
+                crys_rep_ener = model.compute_repulsive_ener(
+                    input[3],
+                    input[4],
+                    input[5],
+                    input[6]
+                )
             else:
                 crys_rep_ener = torch.zeros(target.shape)
-        # normalize target
+        # Normalize target
         if args.task == 'regression':
             target_normed = normalizer.norm(target-crys_rep_ener)
             target_Fxyz_normed = None 
@@ -449,8 +482,7 @@ def train(train_loader, model, criterion, optimizer, epoch,
             mae_errors.update(mae_error, target.size(0))
             mae_Fxyz_errors.update(mae_Fxyz_error, target_Fxyz.size(0))
         else:
-            accuracy, precision, recall, fscore, auc_score = \
-                class_eval(output.data.cpu(), target)
+            accuracy, precision, recall, fscore, auc_score = class_eval(output.data.cpu(), target)
             losses.update(loss.data.cpu().item(), target.size(0))
             accuracies.update(accuracy, target.size(0))
             precisions.update(precision, target.size(0))
@@ -468,53 +500,44 @@ def train(train_loader, model, criterion, optimizer, epoch,
 
         optimizer.step()
 
-
-
-        # measure elapsed time
+        # Measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
 
+        # Print results
         if i % args.print_freq == 0:
             if args.task == 'regression':
-                summary = 'Epoch: [{0}][{1}/{2}]\t'\
-                    'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'\
-                    'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'\
-                    'Loss {loss.val:.4f} ({loss.avg:.4f})\t'\
-                    'MAE {mae_errors.val:.3f} ({mae_errors.avg:.3f})'.format(
-                    epoch, i, len(train_loader), batch_time=batch_time,
-                    data_time=data_time, loss=losses, mae_errors=mae_errors)
-                #)
+                summary = (
+                    f"Epoch: [{epoch}][{i}/{len(train_loader)}]\t"
+                    + f"Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t"
+                    + f"Data {data_time.val:.3f} ({data_time.avg:.3f})\t"
+                    + f"Loss {losses.val:.4f} ({losses.avg:.4f})\t" 
+                    + f"MAE {mae_errors.val:.3f} ({mae_errors.avg:.3f})\n"
+                )
             elif args.task == 'Fxyz':
-                summary='Epoch: [{0}][{1}/{2}]\t'\
-                      'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'\
-                      'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'\
-                      'Loss {loss.val:.4f} ({loss.avg:.4f})\t'\
-                      'MAE {mae_errors.val:.3f} ({mae_errors.avg:.3f})\t'\
-                      'MAE_Fxyz {mae_Fxyz_errors.val:.3f} '\
-                      '({mae_Fxyz_errors.avg:.3f})\t'.format(
-                    epoch, i, len(train_loader), batch_time=batch_time,
-                    data_time=data_time, loss=losses, mae_errors=mae_errors,
-                    mae_Fxyz_errors=mae_Fxyz_errors)
-                #)
+                summary=(
+                    f"Epoch: [{epoch}][{i}/{len(train_loader)}]\t"
+                    + f"Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t"
+                    + f"Data {data_time.val:.3f} ({data_time.avg:.3f})\t"
+                    + f"Loss {losses.val:.4f} ({losses.avg:.4f})\t" 
+                    + f"MAE {mae_errors.val:.3f} ({mae_errors.avg:.3f})\t"
+                    + f"MAE_Fxyz {mae_Fxyz_errors.val:.3f} ({mae_Fxyz_errors.avg:.3f})\n"
+                )
             else:
-                summary='Epoch: [{0}][{1}/{2}]\t'\
-                      'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'\
-                      'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'\
-                      'Loss {loss.val:.4f} ({loss.avg:.4f})\t'\
-                      'Accu {accu.val:.3f} ({accu.avg:.3f})\t'\
-                      'Precision {prec.val:.3f} ({prec.avg:.3f})\t'\
-                      'Recall {recall.val:.3f} ({recall.avg:.3f})\t'\
-                      'F1 {f1.val:.3f} ({f1.avg:.3f})\t'\
-                      'AUC {auc.val:.3f} ({auc.avg:.3f})'.format(
-                    epoch, i, len(train_loader), batch_time=batch_time,
-                    data_time=data_time, loss=losses, accu=accuracies,
-                    prec=precisions, recall=recalls, f1=fscores,
-                    auc=auc_scores)
-                #)
+                summary=(
+                    f"Epoch: [{epoch}][{i}/{len(train_loader)}]\t"
+                    + f"Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t"
+                    + f"Data {data_time.val:.3f} ({data_time.avg:.3f})\t"
+                    + f"Loss {losses.val:.4f} ({losses.avg:.4f})\t" 
+                    + f"Accu {accuracies.val:.3f} ({accuracies.avg:.3f})\t"
+                    + f"Precision {precisions.val:.3f} ({precisions.avg:.3f})\t"
+                    + f"Recall {recalls.val:.3f} ({recalls.avg:.3f})\t"
+                    + f"F1 {fscores.val:.3f} ({fscores.avg:.3f})\t"
+                    + f"AUC {auc_scores.val:.3f} ({auc_scores.avg:.3f})\n"
+                )
             print(summary)
     return summary+'\n'
     
-
 
 def validate(val_loader, model, criterion, normalizer, normalizer_Fxyz, test=False):
     summary=""
@@ -546,31 +569,36 @@ def validate(val_loader, model, criterion, normalizer, normalizer_Fxyz, test=Fal
     for i, (input, target, target_Fxyz, batch_cif_ids) in enumerate(val_loader):
         if args.cuda:
             with torch.no_grad():
-                input_var = (Variable(input[0].cuda(non_blocking=True)),
-                             Variable(input[1].cuda(non_blocking=True)),
-                             input[2].cuda(non_blocking=True),
-                             [crys_idx.cuda(non_blocking=True) for crys_idx in input[3]])
+                input_var = (
+                    Variable(input[0].cuda(non_blocking=True)),
+                    Variable(input[1].cuda(non_blocking=True)),
+                    input[2].cuda(non_blocking=True),
+                    [crys_idx.cuda(non_blocking=True) for crys_idx in input[3]]
+                )
         else:
             with torch.no_grad():
                 if args.model_type == 'cgcnn':
-                    input_var = (Variable(input[0]), # batch_atom_fea
-                                 Variable(input[1]), # batch_nbr_fea
-                                 input[2],           # batch_nbr_fea_idx
-                                 input[3],           # crystal_atom_idx
-                                 input[4],           # MW: batch_atom_type 
-                                 input[5],           # MW: batch_nbr_type
-                                 input[6],           # MW: batch_nbr_dist
-                                 input[7],           # MW: batch_pair_type
-                                 input[8])           # MW: batch_global_fea
+                    input_var = (
+                        Variable(input[0]), # batch_atom_fea
+                            Variable(input[1]), # batch_nbr_fea
+                            input[2],           # batch_nbr_fea_idx
+                            input[3],           # crystal_atom_idx
+                            input[4],           # MW: batch_atom_type 
+                            input[5],           # MW: batch_nbr_type
+                            input[6],           # MW: batch_nbr_dist
+                            input[7],           # MW: batch_pair_type
+                            input[8],           # MW: batch_global_fea
+                    )
                 elif args.model_type == 'spooky':
-                    input_var = (Variable(input[0]), # batch_atom_fea
-                                 input[9],           # batch_nbr_fea_idx_all
-                                 input[3],           # crystal_atom_idx
-                                 input[10],          # batch_gs_fea
-                                 input[11],          # batch_gp_fea
-                                 input[12],          # batch_gd_fea
-                                 input[8])           # batch_global_fea
-
+                    input_var = (
+                        Variable(input[0]), # batch_atom_fea
+                        input[9],           # batch_nbr_fea_idx_all
+                        input[3],           # crystal_atom_idx
+                        input[10],          # batch_gs_fea
+                        input[11],          # batch_gp_fea
+                        input[12],          # batch_gd_fea
+                        input[8],           # batch_global_fea
+                    )
             if args.all_elems != [0]:
                 crys_rep_ener = model.compute_repulsive_ener(input[3],
                                                              input[4],
@@ -726,23 +754,19 @@ def validate(val_loader, model, criterion, normalizer, normalizer_Fxyz, test=Fal
     else:
         star_label = '*'
     if args.task == 'regression':
-        summary1=' {star} MAE {mae_errors.avg:.3f}'.format(star=star_label,
-                                                        mae_errors=mae_errors)
+        summary1=f" {star_label} MAE {mae_errors.avg:.3f}"
         print(summary1)
-        return mae_errors.avg,summary+summary1+'\n'
+        return mae_errors.avg, summary + summary1 + '\n'
     elif args.task == 'Fxyz':
-        summary1=' {star} MAE {mae_errors.avg:.3f} '\
-              'MAE_Fxyz {mae_Fxyz_errors.avg:.3f}'.format(
-                    star=star_label,
-                    mae_errors=mae_errors,
-                    mae_Fxyz_errors=mae_Fxyz_errors)
+        summary1=(
+            f" {star_label} MAE {mae_errors.avg:.3f} MAE_Fxyz {mae_Fxyz_errors.avg:.3f}"
+        )
         print(summary1)
-        return mae_errors.avg+mae_Fxyz_errors.avg,summary+summary1+'\n'
+        return mae_errors.avg + mae_Fxyz_errors.avg,summary + summary1 + '\n'
     else:
-        summary1=' {star} AUC {auc.avg:.3f}'.format(star=star_label,
-                                                 auc=auc_scores)
+        summary1=f" {star_label} AUC {auc_scores.avg:.3f}"
         print(summary1)
-        return auc_scores.avg, summary+summary1+'\n'
+        return auc_scores.avg, summary + summary1 + '\n'
 
 
 #class Normalizer(object):

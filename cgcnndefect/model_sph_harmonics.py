@@ -922,12 +922,13 @@ if __name__ == "__main__":
     # a dummy cubic crystal for testing rotations around origin
     cell = np.eye(3)*10
     symbs = ['C', 'O', 'N', 'S', 'H']
-    positions1 = np.array(\
+    positions1 = np.array(
         [[ 0.0,  0.0,  0.0],  
         [ 1.0,  0.5,  1.7],
         [-2.1, -0.7,  1.2],
         [ 0.9, -1.4, -0.9],
-        [-0.8,  1.2, -1.2]])
+        [-0.8,  1.2, -1.2]]
+    )
     #positions2
     #rotcrystal1 
 

@@ -5,6 +5,7 @@ import pickle
 
 def get_features(fname, all_atom_types, all_nbrs):
     """
+    Get features from a dataset pickle file (fname).
     all_atom_types : list of ints
         list of atomic numbers for each bead
     all_nbrs : list of list of (nbr atomic num, nbr dist, nbr site index)
@@ -13,25 +14,25 @@ def get_features(fname, all_atom_types, all_nbrs):
     with open(fname, 'rb') as f:
         dataset = pickle.load(f)
 
-    feat_tup = dataset.featurize_from_nbr_and_atom_list(all_atom_types,
-                                                        all_nbrs)
+    feat_tup = dataset.featurize_from_nbr_and_atom_list(
+        all_atom_types, all_nbrs
+    )
     return feat_tup
 
 
 if __name__ == '__main__':
     test_all_atom_types = [1, 12]
     test_all_nbrs = [
-                      [
-                        [12, 0.1, 1]
-                      ],
-                      [
-                        [1,0.1,0]
-                      ]
-                    ]
-    fea0, fea1, fea2, fea3, fea4, fea5, fea6, fea7 =\
-        get_features(sys.argv[1],test_all_atom_types,test_all_nbrs)
-
-    print(tup)
+        [
+            [12, 0.1, 1]
+        ],
+        [
+            [1, 0.1, 0]
+        ]
+    ]
+    fea0, fea1, fea2, fea3, fea4, fea5, fea6, fea7 = get_features(
+        sys.argv[1], test_all_atom_types, test_all_nbrs
+    )
 
 
 # I think this part needs to be done entirely in C++ via torch script

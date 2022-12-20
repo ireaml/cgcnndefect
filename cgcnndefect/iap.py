@@ -42,9 +42,11 @@ class CGCNN_IAP(object):
         # Load requested model into pytorch and get its parameters
         if os.path.isfile(modelpath):
             print("=> loading model params '{}'".format(modelpath))
-            model_checkpoint = torch.load(modelpath,
-                                          map_location=lambda storage, 
-                                          loc: storage)
+            model_checkpoint = torch.load(
+                modelpath,
+                map_location=lambda storage, 
+                loc: storage
+            )
             model_args = argparse.Namespace(**model_checkpoint['args'])
             print("=> loaded model params '{}'".format(modelpath))
         else:
@@ -57,14 +59,15 @@ class CGCNN_IAP(object):
                             "classification model")
 
         # initialize model
-        model = CrystalGraphConvNet(orig_atom_fea_len, nbr_fea_len,
-                                    atom_fea_len=model_args.atom_fea_len,
-                                    n_conv=model_args.n_conv,
-                                    h_fea_len=model_args.h_fea_len,
-                                    n_h=model_args.n_h,
-                                    classification=False,
-                                    Fxyz=True if model_args.task == 'Fxyz'\
-                                              else False)
+        model = CrystalGraphConvNet(
+            orig_atom_fea_len, nbr_fea_len,
+            atom_fea_len=model_args.atom_fea_len,
+            n_conv=model_args.n_conv,
+            h_fea_len=model_args.h_fea_len,
+            n_h=model_args.n_h,
+            classification=False,
+            Fxyz=True if model_args.task == 'Fxyz' else False
+        )
 
         # Load a checkpointed model
         if os.path.isfile(modelpath):

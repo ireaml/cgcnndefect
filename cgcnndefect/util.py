@@ -16,9 +16,10 @@ ATOMIC_NUMBER = [
     "W", "Re", "Os", "Ir", "Pt", "Au", "Hg", "Tl", "Pb", "Bi", "Po", "At",
     "Rn", "Fr", "Ra", "Ac", "Th", "Pa", "U", "Np", "Pu", "Am", "Cm", "Bk",
     "Cf", "Es", "Fm", "Md", "No", "Lr", "Rf", "Db", "Sg", "Bh", "Hs", "Mt",
-    "Ds", "Rg", "Cn"]
+    "Ds", "Rg", "Cn"
+]
 elem_lst = [Element(ATOMIC_NUMBER[i]) for i in range(1,len(ATOMIC_NUMBER))]
-ELEM_DICT = dict([(el.symbol,el.Z ) for el in elem_lst])
+ELEM_DICT = dict([(el.symbol, el.Z ) for el in elem_lst])
 ELEM_DICT['X'] = 0
 
 class Normalizer(object):
@@ -58,6 +59,7 @@ def mae(prediction, target):
 
 
 def class_eval(prediction, target):
+    """Calculate accuracy, precision, recall, fscore, auc_score"""
     prediction = np.exp(prediction.numpy())
     target = target.numpy()
     pred_label = np.argmax(prediction, axis=1)
@@ -66,7 +68,8 @@ def class_eval(prediction, target):
         target_label = np.asarray([target_label])
     if prediction.shape[1] == 2:
         precision, recall, fscore, _ = metrics.precision_recall_fscore_support(
-            target_label, pred_label, average='binary')
+            target_label, pred_label, average='binary'
+        )
         auc_score = metrics.roc_auc_score(target_label, prediction[:, 1])
         accuracy = metrics.accuracy_score(target_label, pred_label)
     else:
