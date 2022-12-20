@@ -9,6 +9,7 @@ import json
 import pickle
 
 import numpy as np
+from monty.serialization import dumpfn
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -155,7 +156,7 @@ def main():
     orig_atom_fea_len, nbr_fea_len, global_fea_len = get_features(dataset)
     
     # Build model
-    model = build_model(args)
+    model = build_model(args, orig_atom_fea_len, nbr_fea_len, global_fea_len)
                             
     print("Training...\n")
     
@@ -228,7 +229,9 @@ def print_args(args):
     print(f"\tPytorch seed: {args.seed}")
     print(f"\tPrint every {args.print_freq} batches")
     print(f"Test results will be written to: {args.resultdir}\n")
-    
+    # Store parameters in dict to save as yaml file, for reproducibility
+    parameters = vars(args)
+    dumpfn(parameters, "model_parameters.yaml")
 
 def load_dataset(args):
     dataset = CIFData(
@@ -292,10 +295,11 @@ def get_normalizer(dataset, args):
     return normalizer, normalizer_Fxyz
 
 
-def build_model(args):
+def build_model(args, orig_atom_fea_len, nbr_fea_len, global_fea_len):
     if args.model_type == 'cgcnn':
         model = CrystalGraphConvNet(
-            orig_atom_fea_len, nbr_fea_len,
+            orig_atom_fea_len, 
+            nbr_fea_len,
             atom_fea_len=args.atom_fea_len,
             n_conv=args.n_conv,
             h_fea_len=args.h_fea_len,
