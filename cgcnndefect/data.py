@@ -689,25 +689,27 @@ class CIFData(Dataset):
         """
         cif_id, target, target_Fxyz = 0, None, None 
 
-        all_atom_types = [crystal[i].specie.number\
-                          for i in range(len(crystal))]
+        all_atom_types = [
+            crystal[i].specie.number for i in range(len(crystal))
+        ]  # List of atomic numbers for all sites in structure
 
-        all_nbrs = crystal.get_all_neighbors_old(self.radius, 
-                                                 include_index=True)
+        all_nbrs = crystal.get_all_neighbors_old(
+            self.radius, include_index=True
+        )
 
         all_coords = crystal.coords
 
-        atom_fea, nbr_fea, nbr_fea_idx, atom_type, nbr_type, nbr_dist, pair_type =\
-            self.featurize_from_nbr_and_atom_list(all_atom_types, all_nbrs, cif_id)
-
-        if self.Fxyz:
-            return (atom_fea, nbr_fea, nbr_fea_idx,\
-                    atom_type, nbr_type, nbr_dist, pair_type),\
-                   target, target_Fxyz, cif_id
-        else:
-            return (atom_fea, nbr_fea, nbr_fea_idx,\
-                    atom_type, nbr_type, nbr_dist, pair_type),\
-                   target, None, cif_id
+        (atom_fea, nbr_fea, nbr_fea_idx, atom_type, nbr_type, nbr_dist, pair_type) = (
+            self.featurize_from_nbr_and_atom_list(
+                all_atom_types, all_nbrs, cif_id
+            )
+        )
+        if not self.Fxyz:
+            target_Fxyz = None
+        return (
+            (atom_fea, nbr_fea, nbr_fea_idx, atom_type, nbr_type, nbr_dist, pair_type),
+                target, None, cif_id
+        )
 
     def featurize_from_nbr_and_atom_list(
         self, 
@@ -764,8 +766,8 @@ class CIFData(Dataset):
             if len(nbr) < self.max_num_nbr:
                 warnings.warn(
                     f'Structure with ID {cif_id} did not find enough neighbors '
-                    ' to build graph. If it happens frequently, consider increase '
-                    'radius.'
+                    ' to build graph. If it happens frequently, consider to '
+                    'increase radius.'
                 )
                 # Append neighbour index, and pad with zeros if not enough neighbors
                 nbr_fea_idx.append(
