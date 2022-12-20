@@ -138,8 +138,76 @@ else:
 def main():
     global args, best_mae_error
     torch.manual_seed(args.seed)
-
+      
     # Load data
+    print_args(args)
+    
+    #torch.multiprocessing.set_sharing_strategy('file_system')
+    dataset = load_dataset(args)
+     
+    # Split dataset into train, val, and test
+    train_loader, val_loader, test_loader = train_test_split(dataset, args)
+
+    # Obtain target value normalizer
+    normalizer, normalizer_Fxyz = get_normalizer(dataset, args)
+
+    # Get features
+    orig_atom_fea_len, nbr_fea_len, global_fea_len = get_features(dataset)
+    
+    # Build model
+    model = build_model(args)
+                            
+    print("Training...\n")
+    
+    if args.cuda:
+        model.cuda()
+
+    # Define loss func and optimizer
+    criterion, optimizer = define_loss_opt(args, model)
+
+    # Optionally resume from a checkpoint
+    if args.resume:
+        model, normalizer, optimizer, best_mae_error = set_resume(args, model, optimizer, normalizer, best_mae_error)
+
+    scheduler = set_scheduler(args, optimizer)
+
+    # Pickle the CIFData object so the exact same settings
+    # can be used in predict mode
+    save_files(dataset, args)
+    f = open(os.path.join(args.resultdir, "train.log"), "w")
+    
+    for epoch in range(args.start_epoch, args.epochs):
+        # Train for one epoch
+        scheduler, best_mae_error = train_val_epoch(
+            f, epoch, args,
+            best_mae_error, 
+            train_loader, val_loader,
+            model, criterion, optimizer, normalizer, normalizer_Fxyz, 
+            scheduler,
+        )
+
+    # Test best model
+    print('---------Evaluate Model on Test Set---------------')
+    best_checkpoint = torch.load(os.path.join(args.resultdir, 'model_best.pth.tar'))
+    model.load_state_dict(best_checkpoint['state_dict'])
+    mae, summary = validate(test_loader, model, criterion, normalizer, normalizer_Fxyz, test=True)
+
+    if args.jit:
+        sm = torch.jit.script(model)
+        sm.save(os.path.join(args.resultdir,"model_best.pt"))
+
+        sm1 = torch.jit.load(os.path.join(args.resultdir,'model_best.pt'))
+        print(sm1.dataset1.foo())
+
+        #sm1 = torch.jit.script(dataset1)
+        #sm1.save ('dataset1.pt')
+
+    f.write('---------Evaluate Model on Test Set---------------\n')
+    f.write(summary)
+    f.close()
+
+
+def print_args(args)
     print("Parsing arguments:")
     print(f"\tTask: {args.task}")
     print(f"\tModel type: {args.model_type}")
@@ -161,22 +229,26 @@ def main():
     print(f"\tPrint every {args.print_freq} batches")
     print(f"Test results will be written to: {args.resultdir}\n")
     
-    #torch.multiprocessing.set_sharing_strategy('file_system')
-    #print(f"Task==Fxyz: {args.task=='Fxyz'}")
+
+def load_dataset(args):
     dataset = CIFData(
         *args.data_options,
         args.task=='Fxyz',            # MW: to remove
         args.all_elems,               # MW: needed for computing ZBL
         radius=args.radius,           # IM: radius for neighbor search
-        crys_spec = args.crys_spec,   # MW: if global crystal features available
-        atom_spec = args.atom_spec,   # MW: if local/atom features available
-        pkl_ext = args.pkl_ext,       # MW: if using a specific df.pkl.*
-        model_type = args.model_type, # MW: if using non-CGCNN model
-        njmax = args.njmax,           # MW: max nbrs for sph_harm
-        init_embed_file = args.init_embed_file, # MW: choosing specific file for initial atom embed
-    ) 
+        crys_spec=args.crys_spec,   # MW: if global crystal features available
+        atom_spec=args.atom_spec,   # MW: if local/atom features available
+        pkl_ext=args.pkl_ext,       # MW: if using a specific df.pkl.*
+        model_type=args.model_type, # MW: if using non-CGCNN model
+        njmax=args.njmax,           # MW: max nbrs for sph_harm
+        init_embed_file=args.init_embed_file, # MW: choosing specific file for initial atom embed
+    )
+    return dataset
+
+
+def train_test_split(dataset, args):
+    """Split dataset into train, val, and test sets."""
     collate_fn = collate_pool
-    # Split dataset into train, val, and test
     train_loader, val_loader, test_loader = get_train_val_test_loader(
         dataset=dataset,
         collate_fn=collate_fn,
@@ -191,8 +263,11 @@ def main():
         test_size=args.test_size,
         return_test=True
     )
+    return train_loader, val_loader, test_loader
 
-    # Obtain target value normalizer
+
+def get_normalizer(dataset, args):
+    """Obtain target value normalizer"""
     if args.task == 'classification':
         normalizer = Normalizer(torch.zeros(2))
         normalizer.load_state_dict({'mean': 0., 'std': 1.})
@@ -200,7 +275,7 @@ def main():
     else:
         if len(dataset) < 500:
             warnings.warn('Dataset has less than 500 data points. '
-                          'Lower accuracy is expected. ')
+                        'Lower accuracy is expected. ')
             sample_data_list = [dataset[i] for i in range(len(dataset))]
         else:
             sample_data_list = [
@@ -214,22 +289,10 @@ def main():
             # normalizer_Fxyz = Normalizer(sample_target_Fxyz)
         else:
             normalizer_Fxyz = Normalizer(sample_target) # dummy object for compatibility
+    return normalizer, normalizer_Fxyz
 
-    # Build model
-    # structures, _, _, = dataset[0] #<- Fxyz mod
-    structures, _, _, _ = dataset[0]
-    orig_atom_fea_len = structures[0].shape[-1]  # Number of atom features
-    nbr_fea_len = structures[1].shape[-1]  # Number of bond features
-    if args.crys_spec is not None:
-        global_fea_len = len(structures[7])
-    else:
-        global_fea_len = 0
-    print(
-        f"\nNumber of features:\n"
-        + f"\t-Atom features: {orig_atom_fea_len}\n"
-        + f"\t-Bond features: {nbr_fea_len}\n"
-        + f"\t-Global features: {global_fea_len}\n"
-    )
+
+def build_model(args):
     if args.model_type == 'cgcnn':
         model = CrystalGraphConvNet(
             orig_atom_fea_len, nbr_fea_len,
@@ -263,17 +326,17 @@ def main():
                 n_h = args.n_h,
                 global_fea_len = global_fea_len
             ) #MW
-        
-                            
+    else:
+        raise NotImplementedError(f"Model type {args.model_type} not implemented")
+    
     print(
         "Number trainable params: %d"%sum(p.numel() for p in model.parameters() if p.requires_grad)
     )
-    print("Training...\n")
-    
-    if args.cuda:
-        model.cuda()
+    return model
 
-    # Define loss func and optimizer
+
+def define_loss_opt(args, model):
+    """Define loss function and optimizer"""
     if args.task == 'classification':
         criterion = nn.NLLLoss()
     else:
@@ -292,97 +355,58 @@ def main():
         )
     else:
         raise NameError('Only SGD or Adam is allowed as --optim')
+    return criterion, optimizer
 
-    # Optionally resume from a checkpoint
-    if args.resume:
-        if os.path.isfile(args.resume):
-            print("=> loading checkpoint '{}'".format(args.resume))
-            checkpoint = torch.load(args.resume)
-            args.start_epoch = checkpoint['epoch']
-            best_mae_error = checkpoint['best_mae_error']
-            model.load_state_dict(checkpoint['state_dict'])
-            optimizer.load_state_dict(checkpoint['optimizer'])
-            normalizer.load_state_dict(checkpoint['normalizer'])
-            print("=> loaded checkpoint '{}' (epoch {})"
-                  .format(args.resume, checkpoint['epoch']))
-        else:
-            print("=> no checkpoint found at '{}'".format(args.resume))
 
+def set_resume(args, model, optimizer, normalizer, best_mae_error):
+    if os.path.isfile(args.resume):
+        print("=> loading checkpoint '{}'".format(args.resume))
+        checkpoint = torch.load(args.resume)
+        args.start_epoch = checkpoint['epoch']
+        best_mae_error = checkpoint['best_mae_error']
+        model.load_state_dict(checkpoint['state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer'])
+        normalizer.load_state_dict(checkpoint['normalizer'])
+        print("=> loaded checkpoint '{}' (epoch {})"
+                .format(args.resume, checkpoint['epoch']))
+    else:
+        print("=> no checkpoint found at '{}'".format(args.resume))
+    return model, normalizer, optimizer, best_mae_error
+
+
+def save_files(dataset, args):
+    with open(os.path.join(args.resultdir, 'dataset.pth.tar'), 'wb') as f:
+        pickle.dump(dataset, f) 
+
+
+def get_features(dataset):
+    # structures, _, _, = dataset[0] #<- Fxyz mod
+    structures, _, _, _ = dataset[0]
+    orig_atom_fea_len = structures[0].shape[-1]  # Number of atom features
+    nbr_fea_len = structures[1].shape[-1]  # Number of bond features
+    if args.crys_spec is not None:
+        global_fea_len = len(structures[7])
+    else:
+        global_fea_len = 0
+    print(
+        f"\nNumber of features:\n"
+        + f"\t-Atom features: {orig_atom_fea_len}\n"
+        + f"\t-Bond features: {nbr_fea_len}\n"
+        + f"\t-Global features: {global_fea_len}\n"
+    )
+    return orig_atom_fea_len, nbr_fea_len, global_fea_len
+   
+
+def set_scheduler(args, optimizer):
     scheduler = MultiStepLR(optimizer, milestones=args.lr_milestones, gamma=0.1)
     #scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, 
     #                                              base_lr=args.lr, 
     #                                              max_lr=args.lr*5,
     #                                              step_size_up=200,
     #                                              cycle_momentum=False)
-
-    # Pickle the CIFData object so the exact same settings
-    # can be used in predict mode
-    with open(os.path.join(args.resultdir,'dataset.pth.tar'), 'wb') as f:
-        pickle.dump(dataset, f) 
-
-    f = open(os.path.join(args.resultdir, "train.log"), "w")
-
-    for epoch in range(args.start_epoch, args.epochs):
-        # Train for one epoch
-        summary = train(
-            train_loader, model, criterion, 
-            optimizer, epoch, normalizer, normalizer_Fxyz
-        )
-        f.write(summary)
-
-        # Evaluate on validation set
-        mae_error,summary = validate(
-            val_loader, model, criterion, normalizer, normalizer_Fxyz
-        )
-        f.write(summary)
-
-        if mae_error != mae_error:
-            print('Exit due to NaN')
-            sys.exit(1)
-
-        scheduler.step()
-
-
-        # Remember the best mae_eror and save checkpoint
-        if args.task in ['regression', 'Fxyz']:
-            is_best = mae_error < best_mae_error
-            best_mae_error = min(mae_error, best_mae_error)
-        else:
-            is_best = mae_error > best_mae_error
-            best_mae_error = max(mae_error, best_mae_error)
-        save_checkpoint(
-            {
-                'epoch': epoch + 1,
-                'state_dict': model.state_dict(),
-                'best_mae_error': best_mae_error,
-                'optimizer': optimizer.state_dict(),
-                'normalizer': normalizer.state_dict(),
-                'normalizer_Fxyz': normalizer_Fxyz.state_dict(),
-                'args': vars(args)
-            }, is_best, args.resultdir
-        )
-
-    # Test best model
-    print('---------Evaluate Model on Test Set---------------')
-    best_checkpoint = torch.load(os.path.join(args.resultdir, 'model_best.pth.tar'))
-    model.load_state_dict(best_checkpoint['state_dict'])
-    mae, summary = validate(test_loader, model, criterion, normalizer, normalizer_Fxyz, test=True)
-
-    if args.jit:
-        sm = torch.jit.script(model)
-        sm.save(os.path.join(args.resultdir,"model_best.pt"))
-
-        sm1 = torch.jit.load(os.path.join(args.resultdir,'model_best.pt'))
-        print(sm1.dataset1.foo())
-
-        #sm1 = torch.jit.script(dataset1)
-        #sm1.save ('dataset1.pt')
-
-    f.write('---------Evaluate Model on Test Set---------------\n')
-    f.write(summary)
-    f.close()
-
-
+    return scheduler
+   
+        
 def train(
     train_loader, model, criterion, optimizer, epoch, 
     normalizer, normalizer_Fxyz
@@ -792,6 +816,54 @@ def validate(val_loader, model, criterion, normalizer, normalizer_Fxyz, test=Fal
         summary1=f" {star_label} AUC {auc_scores.avg:.3f}"
         print(summary1)
         return auc_scores.avg, summary + summary1 + '\n'
+
+
+def train_val_epoch(
+    f, epoch, args,
+    best_mae_error, 
+    train_loader, val_loader,
+    model, criterion, optimizer, normalizer, normalizer_Fxyz, 
+    scheduler,
+):
+    summary = train(
+        train_loader, model, criterion, 
+        optimizer, epoch, normalizer, normalizer_Fxyz
+    )
+    f.write(summary)
+
+    # Evaluate on validation set
+    mae_error, summary = validate(
+        val_loader, model, criterion, normalizer, normalizer_Fxyz
+    )
+    f.write(summary)
+
+    if mae_error != mae_error:
+        print('Exit due to NaN')
+        sys.exit(1)
+
+    scheduler.step()
+    
+    # Remember the best mae_eror and save checkpoint
+    if args.task in ['regression', 'Fxyz']:
+        is_best = mae_error < best_mae_error
+        best_mae_error = min(mae_error, best_mae_error)
+    else:
+        is_best = mae_error > best_mae_error
+        best_mae_error = max(mae_error, best_mae_error)
+    
+    save_checkpoint(
+        {
+            'epoch': epoch + 1,
+            'state_dict': model.state_dict(),
+            'best_mae_error': best_mae_error,
+            'optimizer': optimizer.state_dict(),
+            'normalizer': normalizer.state_dict(),
+            'normalizer_Fxyz': normalizer_Fxyz.state_dict(),
+            'args': vars(args)
+        }, is_best, args.resultdir
+    )
+    
+    return scheduler, best_mae_error
 
 
 #class Normalizer(object):
