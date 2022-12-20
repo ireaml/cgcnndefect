@@ -207,7 +207,7 @@ def main():
     f.close()
 
 
-def print_args(args)
+def print_args(args):
     print("Parsing arguments:")
     print(f"\tTask: {args.task}")
     print(f"\tModel type: {args.model_type}")
